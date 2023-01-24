@@ -246,21 +246,19 @@ arthas  中有很多功能可以对一个方法进行监控，比如 monitor，w
 
 但是对于一个所有对象都有的方法，应该选用一个可以全局统计的功能，因此选用了火焰图功能，对所有方法进行了统计，因此也有了意外收获
 
-![陈节勋 > 锦江 OOM 问题排查 > image2023-1-11_19-5-10.png](http://doc.datapipeline.com/download/attachments/89002944/image2023-1-11_19-5-10.png?version=1&modificationDate=1673435111000&api=v2)
+![SearchWait](https://github.com/chenjiexun/narrow/blob/main/pic/java/SearchWait.png)
 
 在搜索 wait 时，发现了我们一直苦苦追寻的 JVM_MonitorWait，但这个方法并不是真凶，因为它并没有调用 ObjectSynchronizer::inflate 方法
 
-![陈节勋 > 锦江 OOM 问题排查 > image2023-1-11_19-6-16.png](http://doc.datapipeline.com/download/attachments/89002944/image2023-1-11_19-6-16.png?version=1&modificationDate=1673435177000&api=v2)
-
 因此我们该用 JVM_MonitorWait 进行检索
 
-![陈节勋 > 锦江 OOM 问题排查 > image2023-1-11_19-9-7.png](http://doc.datapipeline.com/download/attachments/89002944/image2023-1-11_19-9-7.png?version=1&modificationDate=1673435348000&api=v2)
+![HistoricalStatJobWait.png](https://github.com/chenjiexun/narrow/blob/main/pic/java/HistoricalStatJobWait.png)
 
 发现主要是 HistoricalStatJob 这个任务在调用 ObjectSynchronizer::inflate
 
-于是做了关闭这个 job 的对比实验，[ObjectSynchronizer::inflate 内存占用统计](http://doc.datapipeline.com/pages/viewpage.action?pageId=89002875&src=contextnavpagetreemode)
+于是做了关闭这个 job 的对比实验
 
-# 3. 深入排查
+## 3. 深入排查
 
 通过 HistoricalStatJob 关闭对比实验，我们大体定位到了产生堆外内存不断增长的主要因素，与生产环境获取到的火焰图对比，是同一元素导致的堆外内存增长，但对于这个任务为什么会占用这么多堆外内存的原因还需继续排查
 
@@ -270,42 +268,38 @@ a. ES 相关的组件存在对象长时间引用未回收
 
 b. jdk 的问题
 
-这里想的是，如果是 jdk 的问题，那么所有使用这个版本的公司都应该会有这个问题，而我们在互联网上却基本搜索不到 Object Monitors 占用大量堆外内存相关的文档，所以这里就先排查了 a 和 b 两个原因
+这里想的是，如果是 jdk 的问题，那么所有使用这个版本的公司都应该会有这个问题，而我们在互联网上却基本搜索不到 Object Monitors 占用大量堆外内存相关的文档，所以这里就先排查了是否为 ES 组件的问题
 
-## 3.1 ES 相关的问题
+### 3.1 ES 相关的问题
 
 这里主要通过的是 MAT 的直方图功能分析的，如果是 ES 相关的组件存在对象长时间引用未回收的问题，那么在直方图中应该可以搜索到 ES 组件创建的对象，然而我们直方图中却搜索不到任何相关的对象
 
 同时如果是堆内对象长时间占用 Object Monitors 引起的堆外内存增加，按照一个 object 实例对应一个 Object Monitors 的逻辑，那么堆内的内存应该也会不断增大
 
-```
-```
-
-
-
-HistoricalStatJob 的 wait 最终是调用的 BasicFuture 的 wait 方法，所以这里搜索的 BasicFuture，上图可以说明 BasicFuture 在 JVM 中是没有存活实例的
+HistoricalStatJob 的 wait 最终是调用的 BasicFuture 的 wait 方法，所以我们在 MAT 中搜索的 BasicFuture，却发现 BasicFuture 在 JVM 中是没有存活实例的
 
 并且我们通过 idea 在 BasicFuture get 方法上 debug 时，发现 ES 相关的组件是正常调用 get 方法的，并且每次请求都是创建新的 BasicFuture，并且在请求完成后能正常退出
 
 然后我们通过 arthas 的 monitor 功能监控 ，发现该方法确实是正常返回的，所以不存在 wait 方法阻塞协程的情况
 
+```sh
+ monitor org.apache.http.concurrent.BasicFuture get
+Press Q or Ctrl+C to abort.
+Affect(class count: 1 , method count: 2) cost in 122 ms, listenerId: 1
+ timestamp                        class                                            method                                            total           success          fail            avg-rt(ms)       fail-rate      
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 2023-01-24 09:56:14              org.apache.http.concurrent.BasicFuture           get                                               133             133              0               5.31             0.00%          
 
-
+ timestamp                        class                                            method                                            total           success          fail            avg-rt(ms)       fail-rate      
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 2023-01-24 09:57:14              org.apache.http.concurrent.BasicFuture           get                                               130             130              0               4.70             0.00%          
 ```
-```
-
-
 
 在关闭 HistoricalStatJob 的实验中，我们通过 arthas 对服务进行采样生成了火焰图，发现有另一个定时任务也在调用 ObjectSynchronizer::inflate 方法，同时，Object Monitors 堆外内存占用大小也在增加
 
-```
-```
-
-
-
 这一系列现象可以证明 Object Monitors 占用的大量堆外内存的元凶不是 ES 相关的组件
 
-## 3.2 jdk 的问题
+### 3.2 jdk 的问题
 
 目前很多介绍 Object Monitors 的文章都是基于 jdk 8 进行分析的，很少有基于 jdk 17 的文章，为进一步验证 Object Monitors 的回收逻辑，于是查看了 jdk 17 的源码
 
