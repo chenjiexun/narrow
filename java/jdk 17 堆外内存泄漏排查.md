@@ -93,7 +93,8 @@ pmap -x -p 8|sort -n -k3
 00007fb6ed400000    8192    8192    8192 rw---   [ anon ] 
 00007fb728000000    8332    8332    8332 rw---   [ anon ] 
 00007fb704000000   10092   10084   10084 rw---   [ anon ] 
-00007fb78b18f000   19324   11560       0 r-x-- /opt/java/openjdk/lib/server/libjvm.so 0000000800000000   12100   11804    4248 rw--- /opt/java/openjdk/lib/server/classes.jsa 00007fb708000000   11860   11844   11844 rw---   [ anon ] 
+00007fb78b18f000   19324   11560       0 r-x-- /opt/java/openjdk/lib/server/libjvm.so
+0000000800000000   12100   11804    4248 rw--- /opt/java/openjdk/lib/server/classes.jsa 00007fb708000000   11860   11844   11844 rw---   [ anon ] 
 00007fb6d8000000   14816   11960   11960 rw---   [ anon ] 
 00007fb6e0000000   37796   13116   13116 rw---   [ anon ] 
 000055acffb6a000   14996   14812   14812 rw---   [ anon ] 
@@ -143,7 +144,7 @@ jeprof --show_bytes --pdf `which java` jeprof.*.heap > /tmp/jemalloc.pdf
 
 ## 2.6 arthas
 
-因为 JVM_MonitorWait 这个方法是 java Object.wait() 的底层实现方法，所以想查看一下这个方法被些线程调用过
+因为 JVM_MonitorWait 这个方法是 java Object.wait() 的底层实现方法，所以想查看一下  Object.wait()  这个方法被些线程调用过
 
 arthas  中有很多功能可以对一个方法进行监控，比如 monitor，watch，trace 等，针对某个具体方法可以使用这些功能
 
@@ -165,7 +166,7 @@ arthas  中有很多功能可以对一个方法进行监控，比如 monitor，w
 
 # 3. 深入排查
 
-通过 HistoricalStatJob 关闭对比实验，我们大体定位到了产生堆外内存不断增长的主要因素，与客户那获取到的火焰图对比，是同一元素导致的堆外内存增长，但对于这个任务为什么会占用这么多堆外内存的原因还需继续排查
+通过 HistoricalStatJob 关闭对比实验，我们大体定位到了产生堆外内存不断增长的主要因素，与生产环境获取到的火焰图对比，是同一元素导致的堆外内存增长，但对于这个任务为什么会占用这么多堆外内存的原因还需继续排查
 
 这里大概有两个方向可以去排查
 
@@ -243,13 +244,13 @@ void MonitorDeflationThread::monitor_deflation_thread_entry(JavaThread* jt, TRAP
 
 二是 VMThread，在 java 进程退出时进行 Object Monitors 的回收
 
-所以这里去检查了一下发生 oom 客户的 jstack 下的线程运行情况，java 进程运行了三周左右的时间，MonitorDeflationThread 线程才运行了 0.07 ms
+所以这里去检查了一下发生 OOM 节点的 jstack 下的线程运行情况，java 进程运行了三周左右的时间，MonitorDeflationThread 线程才运行了 0.07 ms
 
 ```sh
 "Monitor Deflation Thread" #6 daemon prio=9 os_prio=0 cpu=0.07ms elapsed=1891404.33s tid=0x00007f91b81469c0 nid=0x19 runnable  [0x0000000000000000]   java.lang.Thread.State: RUNNABLE
 ```
 
-于是检查了一下自己开发机上的 MonitorDeflationThread 回收情况，和客户环境中类似，启动后就再也没获得过 cpu 运行时间
+于是检查了一下自己开发机上的 MonitorDeflationThread 回收情况，和发生 OOM 节点类似，启动后就再也没获得过 cpu 运行时间
 
 ```sh
 # jstack 8|grep Deflation 
