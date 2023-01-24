@@ -2,67 +2,165 @@
 
 ## 1. 背景
 
-在维护公司内部某个 java 服务时，使用 top 命令发现这个服务的进程使用了大量的内存
+在维护公司内部某个 java 服务时，使用 top 命令发现这个服务其中一个节点的 java 进程使用了大量的内存，远远超出了 jvm 设的最大 10g 
+
+```sh
+# top
+top - 03:33:23 up 210 days, 35 min,  0 users,  load average: 0.16, 0.06, 0.06
+Tasks:   4 total,   1 running,   3 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  3.3 us,  0.3 sy,  0.0 ni, 95.8 id,  0.5 wa,  0.0 hi,  0.0 si,  0.0 st
+MiB Mem :  32011.0 total,   1605.3 free,  25929.4 used,   4475.5 buff/cache
+MiB Swap:      0.0 total,      0.0 free,      0.0 used.   4087.0 avail Mem 
+
+  PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND                                                                                                                                         
+    8 root      20   0   32.7g  21.2g  24180 S  11.3  67.7   1760:10 java                                                                                                                                            
+    1 root      20   0    7064    632    328 S   0.0   0.0   0:00.02 bash                                                                                                                                            
+ 9844 root      20   0    7228   2156   1660 S   0.0   0.0   0:00.01 bash                                                                                                                                            
+ 9851 root      20   0    9056   1924   1356 R   0.0   0.0   0:00.00 top
+```
+
+在 arthas 中发现堆和元数据空间只使用了 1G 不到的内存
 
 ```
+Memory                                        used           total          max             usage          GC                                                                                                         
+heap                                          271M           1120M          2048M           13.28%         gc.shenandoah_pauses.count                            2892                                                 
+shenandoah                                    271M           1120M          2048M           13.28%         gc.shenandoah_pauses.time(ms)                         280                                                  
+nonheap                                       175M           213M           -1              82.40%         gc.shenandoah_cycles.count                            723                                                  
+metaspace                                     131M           132M           -1              99.40%         gc.shenandoah_cycles.time(ms)                         87522                                                
+compressed_class_space                        16M            16M            3072M           0.53%                                                                                                                     
+codecache                                     27M            64M            128M            21.61%                                                                                                                    
+mapped                                        0K             0K             -               0.00%                                                                                                                     
+direct                                        24M            24M            -               100.00%                                                                                                                   
+mapped - 'non-volatile memory'                0K             0K             -               0.00% 
 ```
 
-
-
-而在 arthas 中发现堆和元数据空间只使用了 1G 不到的内存
-
-```
-```
-
-
-
-因此可以判断不是堆内空间导致的大量内存占用，于是开始怀疑是堆外内存导致的占用，然后使用 java 自带的 NMT 工具发现 Object Monitors 使用了大量的内存
+因此可以判断不是堆内空间导致的大量内存占用，于是开始怀疑是堆外内存导致的占用，然后使用 java 自带的 NMT 工具发现 Object Monitors 使用了大量的内存，大概有 11g
 
 ```sh
 jcmd pid VM.native_memory
 
+11:
 
+Native Memory Tracking:
+
+(Omitting categories weighting less than 1KB)
+
+Total: reserved=23028689KB, committed=19257169KB
+-                 Java Heap (reserved=6291456KB, committed=5971968KB)
+                            (mmap: reserved=6291456KB, committed=5971968KB) 
+ 
+-                     Class (reserved=3149142KB, committed=20166KB)
+                            (classes #26675)
+                            (  instance classes #25025, array classes #1650)
+                            (malloc=3414KB #75359) 
+                            (mmap: reserved=3145728KB, committed=16752KB) 
+                            (  Metadata:   )
+                            (    reserved=122880KB, committed=118160KB)
+                            (    used=117478KB)
+                            (    waste=682KB =0.58%)
+                            (  Class space:)
+                            (    reserved=3145728KB, committed=16752KB)
+                            (    used=15962KB)
+                            (    waste=790KB =4.72%)
+ 
+-                    Thread (reserved=79160KB, committed=31792KB)
+                            (thread #273)
+                            (stack: reserved=78364KB, committed=30996KB)
+                            (malloc=479KB #1639) 
+                            (arena=318KB #543)
+ 
+-                      Code (reserved=135117KB, committed=69069KB)
+                            (malloc=3021KB #18438) 
+                            (mmap: reserved=132096KB, committed=66048KB) 
+ 
+-                        GC (reserved=403279KB, committed=198479KB)
+                            (malloc=8007KB #21054) 
+                            (mmap: reserved=395272KB, committed=190472KB) 
+ 
+-                  Compiler (reserved=3543KB, committed=3543KB)
+                            (malloc=3380KB #2252) 
+                            (arena=163KB #3)
+ 
+-                  Internal (reserved=3717KB, committed=3717KB)
+                            (malloc=3681KB #26364) 
+                            (mmap: reserved=36KB, committed=36KB) 
+ 
+-                     Other (reserved=83635KB, committed=83635KB)
+                            (malloc=83635KB #145) 
+ 
+-                    Symbol (reserved=28699KB, committed=28699KB)
+                            (malloc=26581KB #723205) 
+                            (arena=2118KB #1)
+ 
+-    Native Memory Tracking (reserved=894898KB, committed=894898KB)
+                            (malloc=57KB #868) 
+                            (tracking overhead=894841KB)
+ 
+-        Shared class space (reserved=12288KB, committed=12168KB)
+                            (mmap: reserved=12288KB, committed=12168KB) 
+ 
+-               Arena Chunk (reserved=195KB, committed=195KB)
+                            (malloc=195KB) 
+ 
+-                   Tracing (reserved=32KB, committed=32KB)
+                            (arena=32KB #1)
+ 
+-                    Module (reserved=1620KB, committed=1620KB)
+                            (malloc=1620KB #6690) 
+ 
+-                 Safepoint (reserved=8KB, committed=8KB)
+                            (mmap: reserved=8KB, committed=8KB) 
+ 
+-           Synchronization (reserved=543544KB, committed=543544KB)
+                            (malloc=543544KB #869548) 
+ 
+-            Serviceability (reserved=1KB, committed=1KB)
+                            (malloc=1KB #6) 
+ 
+-                 Metaspace (reserved=123822KB, committed=119102KB)
+                            (malloc=942KB #972) 
+                            (mmap: reserved=122880KB, committed=118160KB) 
+ 
+-      String Deduplication (reserved=3402KB, committed=3402KB)
+                            (malloc=3402KB #34003) 
+ 
+-           Object Monitors (reserved=11271131KB, committed=11271131KB)
+                            (malloc=11271131KB #55488645) 
 ```
-
-
 
 jdk 17 之后，NMT 默认是 summary，17 之前需要在 jvm 启动参数上加 -XX:NativeMemoryTracking= summary | detail 配置显示开启
 
 这里我们只能看到 Object Monitors 使用了大量的内存，但没办法看到具体是哪个方法在使用这块的内存，通过 jstack 也没能看到过多有用的信息，因此我们让运维同学在 compose 文件中加上 -XX:NativeMemoryTracking=detail 参数进行重启，开启基准线
 
-```
+```sh
 jcmd pid VM.native_memory baseline
 ```
 
 运行一段时间后，通过命令拿到详细文件
 
-```
+```sh
 jcmd pid VM.native_memory detail.diff
 ```
 
 发现主要使用内存方法是 ObjectSynchronizer::inflate
 
+```sh
+[0x00007fdd4f6262aa] ObjectSynchronizer::inflate(Thread*, oopDesc*, ObjectSynchronizer::InflateCause)+0x12a
+[0x00007fdd4f6269f0] ObjectSynchronizer::wait(Handle, long, JavaThread*)+0x50
+[0x00007fdd4f10d93f] JVM_MonitorWait+0x15f
+[0x00007fdd3840dd1b]
+                             (malloc=1188029KB type=Object Monitors +383568KB #5848756 +1888335)
 ```
-```
-
-
 
 至此，我们还是没能知道是哪个具体的线程和对象在使用此方法，需要使用其他工具在进行更详细的分析
 
-# 2. 排查尝试
+## 2. 排查尝试
 
 这里尝试了很多的工具，由于篇幅的关系，就不针对每个工具的使用进行介绍，对于使用的工具，也未能完整深入的使用，如果某个工具还有某些功能是可以分析这个问题的，还望大佬指教，如在使用这些工具时遇到问题，欢迎一起谈论排坑
 
-## 2.1 复现
+因为自己开发机上的镜像底包 java 版本是 17.0.1，这个版本的 NMT 没有统计 「Object Monitors」，后面发现这块内存使用被统计到「 Internal」 了，所以部署了和生产环境同一 JAVA 版本的服务，运行两天后，发现也有此问题，然后查看生产环境的其他节点，也有这个问题，因此可以断定这是一个普遍情况
 
-因为自己开发机上的镜像底包 java 版本是 17.0.1，这个版本的 NMT 没有统计 「Object Monitors」，后面发现这块内存使用被统计到「 Internal」 了，所以部署了和生产环境同一 JAVA 版本的服务，运行两天后，发现也有此问题，
-
-```
-```
-
-因此可以断定这是一个普遍情况
-
-## 2.2 jstack
+### 2.1 jstack
 
 这里主要想看一下是否有线程异常，或者死锁的情况，jstack 中能显示当前现场的调用栈，但没办法显示 native 方法的调用，也没办法对 ObjectSynchronizer::inflate 的使用方法进行统计
 
@@ -70,7 +168,7 @@ jcmd pid VM.native_memory detail.diff
 
 和自己开发机上部署的服务 jstack 结果进行对比，也没有观察到异常情况
 
-## 2.3 pmap + gdb
+### 2.2 pmap + gdb
 
 通过 pmap 并没有发现进程中有开辟大内存的现象，都是缓慢增加，并且通过 NMT 得到的地址也不一定是内存开辟的地址，这里的主要问题是，没有办法拿到内存开辟的具体地址，因此也无法通过 gdb 查看内存中的数据
 
@@ -109,19 +207,19 @@ pmap -x -p 8|sort -n -k3
 total kB         8136404 2761180 2736628
 ```
 
-## 2.4 jemalloc
+### 2.3 jemalloc
 
 有不少文章使了 jemalloc、temalloc 来进行堆外内存的分析，它的主要原理是替换 linux 自带的 malloc 方法，通过 hock 的方式查看哪个方法调用 malloc 方法
 
 不过这个工具使用效果并不理想，只能看到系统的方法调用，并不能看到 java 相关的代码调用链路
 
-```
+```sh
 jeprof --show_bytes --pdf `which java` jeprof.*.heap > /tmp/jemalloc.pdf
 ```
 
 尝试打开 jemalloc 打印的 heap 文件，也没能看到有用信息
 
-```
+```sh
 # cat jeprof.out.8.20.i20.heap  
 ...... 
 7f4513be9000-7f4513bfa000 r-xp 00000000 fd:01 6163114                    /tmp/libnetty_transport_native_epoll_x86_6412962575108046029426.so (deleted) 
@@ -131,18 +229,16 @@ jeprof --show_bytes --pdf `which java` jeprof.*.heap > /tmp/jemalloc.pdf
 7f4513dfd000-7f4513dff000 r-xp 00000000 fd:01 4325855                   /opt/java/openjdk/lib/libextnet.so 
 7f4513dff000-7f4513ffe000 ---p 00002000 fd:01 4325855                    /opt/java/openjdk/lib/libextnet.so 
 7f4513ffe000-7f4513fff000 r--p 00001000 fd:01 4325855                    /opt/java/openjdk/lib/libextnet.so 
-7f4513fff000-7f4514000000 rw-p 00002000 fd:01 4325855                    /opt/java/openjdk/lib/libextnet.so
+7f4513fff000-7f4514000000 rw-p 00002000 fd:01 4325855                    /opt/java/openjdk/lib/libextnet.s
 ```
 
-
-
-## 2.5 JMC
+### 2.4 JMC
 
 看到一些文章用 JMC 监控 java 进程的内存使用，所以对 JMC 进行了尝试，后面发现这个监控和 arthas 的 memory 功能一样，也没法看到 internal 的使用情况
 
 其他一些功能均有替代品
 
-## 2.6 arthas
+### 2.5 arthas
 
 因为 JVM_MonitorWait 这个方法是 java Object.wait() 的底层实现方法，所以想查看一下  Object.wait()  这个方法被些线程调用过
 
