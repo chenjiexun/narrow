@@ -128,7 +128,7 @@ Total: reserved=23028689KB, committed=19257169KB
                             (malloc=11271131KB #55488645) 
 ```
 
-jdk 17 之后，NMT 默认是 summary，17 之前需要在 jvm 启动参数上加 -XX:NativeMemoryTracking= summary | detail 配置显示开启
+NMT 功能的开启需要在 jvm 启动参数上加 -XX:NativeMemoryTracking= summary | detail
 
 这里我们只能看到 Object Monitors 使用了大量的内存，但没办法看到具体是哪个方法在使用这块的内存，通过 jstack 也没能看到过多有用的信息，因此我们让运维同学在 compose 文件中加上 -XX:NativeMemoryTracking=detail 参数进行重启，开启基准线
 
@@ -156,7 +156,7 @@ jcmd pid VM.native_memory detail.diff
 
 ## 2. 排查尝试
 
-这里尝试了很多的工具，由于篇幅的关系，就不针对每个工具的使用进行介绍，对于使用的工具，也未能完整深入的使用，如果某个工具还有某些功能是可以分析这个问题的，还望大佬指教，如在使用这些工具时遇到问题，欢迎一起谈论排坑
+这里尝试了很多的工具，由于篇幅的关系，就不针对每个工具的使用进行介绍，对于使用到的工具，也未能完整深入的使用，如果某个工具还有某些功能是可以分析这个问题的，还望大佬指教，如在使用这些工具时遇到问题，欢迎一起探讨排坑
 
 因为自己开发机上的镜像底包 java 版本是 17.0.1，这个版本的 NMT 没有统计 「Object Monitors」，后面发现这块内存使用被统计到「 Internal」 了，所以部署了和生产环境同一 JAVA 版本的服务，运行两天后，发现也有此问题，然后查看生产环境的其他节点，也有这个问题，因此可以断定这是一个普遍情况
 

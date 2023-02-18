@@ -10,19 +10,13 @@
 
 ## 1. -XX:GuaranteedSafepointInterval
 
-间隔多少 ms 生成一个安全点，**必须配置**
+间隔多少 ms 生成一个安全点
 
 ```sh
 -XX:GuaranteedSafepointInterval=1000 # 默认值是 1000，为 0 时无意义，最大为 max_jint
 ```
 
 安全点，同 STW，线程运行到安全点时，具体使用的对象，锁等信息才能被确认，GC 线程才确认哪部分对象是可以被回收的等等，感兴趣的同学可以自行摆渡
-
-在 Object Monitors 回收中，GuaranteedSafepointInterval 的配置一是用于安全点的生成，接受 vmThread 的事件通知，二是 Object Monitors 线程回收的等待间隔，避免一直占用资源
-
-在此次 oom 排查的过程中，不配置 GuaranteedSafepointInterval 时，不进行 Object Monitors 回收，在 OPT 中将 GuaranteedSafepointInterval 设为 JVM 里配置的的默认值，则进行回收，所以此参数必须配置
-
-**至于这个测试为什么需要显式配置才能使 Object Monitors 回收线程能够获取到 cpu 运行时间的逻辑自己从源码中并没有找到答案，欢迎感兴趣的朋友一起讨论**
 
 ## 2. -XX:AvgMonitorsPerThreadEstimate
 
